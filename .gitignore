@@ -1,0 +1,9 @@
+*.txt
+*.log
+*.bin
+*.zip
+screenlog.*
+*.cpp
+target/
+.vscode/
+.DS_Store
