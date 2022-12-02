@@ -47,7 +47,7 @@ Sleep duration: See #define SLEEPTIMEinMINUTES
 #include "math.h"
 #include "photon-thermistor.h"
 
-SYSTEM_MODE(MANUAL);
+SYSTEM_MODE(SEMI_AUTOMATIC);
 // SYSTEM_THREAD(ENABLED);
 
 // General definitions
@@ -80,8 +80,8 @@ String myID = ""; // Device Id
 #define SAMPLEsINTERVAL 20UL            // Interval of time between samples in ms. A value of 20ms is optimal in my tests
 #define VacuumPublishLimits -1          // Minimum vacuum required to permit publish( 1 always publish, -1: publish only if vacuum) NOT USED
 #define VacMinChange 1                  // Minimum changes in vacuum to initiate a publish within SLEEPTIMEinMINUTES
-#define StartDSTtime 1583647200         // dim 08 mar 2020, 02 h 00 = 1583647200 local time
-#define EndDSTtime 1604214000           // dim 01 nov 2020, 02 h 00 = 1572850800 local time
+#define StartDSTtime 1678604400         // dim 12 mar 2023, 02 h 00 = 1678604400 local time
+#define EndDSTtime 1699167600           // dim 05 nov 2023, 02 h 00 = 1699167600 local time
 #define ChargeVoltageMaxLevel_cold 4208 // Max voltage allow by charger for cold period
 #define ChargeVoltageMaxLevel_warm 4112 // Max voltage allow by charger for warm period to prevent overcharge
 #define UpdateCounterInit 4             // Number of cycle to stay awake for software update and calibration
@@ -104,7 +104,7 @@ String myID = ""; // Device Id
 float minBatteryLevel = 20.0; // Sleep unless battery is above this level
 
 Thermistor *ext_thermistor;
-Thermistor *battery_thermistor;
+// Thermistor *battery_thermistor;
 int thermistorPowerPin = D3;
 int Ext_thermistorInputPin = A1;
 // int Bat_thermistorInputPin = B5;
@@ -250,7 +250,6 @@ void setup()
         EEPROM.get(ThermistorOffsetAddress, thermistorOffset);
         Log.info("(setup) Thermistor is calibrated: %f", thermistorOffset);
     }
-    Cellular.on();
     connectTowerAndCloud();
     Log.info("(setup) Setup Completed");
 }
@@ -263,6 +262,7 @@ void connectTowerAndCloud()
     if (soc > minBatteryLevel)
     {
         Log.info("(connectTowerAndCloud) Connecting to tower and cloud.");
+        Cellular.on();
         Particle.connect();
         if (waitFor(Particle.connected, maxConnectTime * 1000UL))
         {
@@ -427,7 +427,7 @@ void setRGBmirorring(bool state)
 // ***************************************************************
 void goToSleep(int sleepType)
 {
-    unsigned long sleepDuration = 0;
+    unsigned long sleepTimeSecond = 0;
     unsigned long NightSleepTimeInMinutes = NIGHT_SLEEP_LENGTH_HR * 60;
 
     // Log info for debugging before going to sleep
@@ -462,10 +462,10 @@ void goToSleep(int sleepType)
     case SLEEP_NORMAL:
         // Normal sleep i.e. STOP Mode sleep
         // sleeps duration corrected to next time boundary + TimeBoundaryOffset seconds
-        sleepDuration = (SLEEPTIMEinMINUTES - Time.minute() % SLEEPTIMEinMINUTES) * 60 - Time.second() + TimeBoundaryOffset;
-        if (sleepDuration > 360UL)
+        sleepTimeSecond = (SLEEPTIMEinMINUTES - Time.minute() % SLEEPTIMEinMINUTES) * 60 - Time.second() + TimeBoundaryOffset;
+        if (sleepTimeSecond > 360UL)
         {
-            sleepDuration = 300UL;
+            sleepTimeSecond = 300UL; // En cas d'erreur de calcul
         }
         if (SoftUpdateDisponible)
         {
@@ -474,8 +474,8 @@ void goToSleep(int sleepType)
                 SoftUpdateDisponible = false;
             }
             Log.info("(goToSleep) OTA available, not sleeping! updateCounter = %d", updateCounter);
-            Log.info("(goToSleep) 'Waiting' for %lu seconds.", sleepDuration);
-            for (unsigned long i = 0; i < (sleepDuration - 2); i++)
+            Log.info("(goToSleep) 'Waiting' for %lu seconds.", sleepTimeSecond);
+            for (unsigned long i = 0; i < (sleepTimeSecond - 2); i++)
             {
                 Particle.process(); // Gives time to system
                 delay(1000UL);
@@ -483,83 +483,84 @@ void goToSleep(int sleepType)
         }
         else
         {
-            Log.info("(goToSleep) 'SLEEP_NORMAL' for %lu seconds", sleepDuration);
+            Log.info("(goToSleep) 'SLEEP_NORMAL' for %lu seconds", sleepTimeSecond);
             // if (!SoftUpdateDisponible){
             setRGBmirorring(false);
             delay(2000UL);
             SystemSleepConfiguration config;
             config.mode(SystemSleepMode::STOP)
                 .network(NETWORK_INTERFACE_CELLULAR)
-                .gpio(wakeupPin, RISING)
+                // .network(HAL_SLEEP_NETWORK_FLAG_INACTIVE_STANDBY)
+                .gpio(wakeupPin, FALLING)
                 .flag(SystemSleepFlag::WAIT_CLOUD)
-                .duration(sleepDuration);
+                .duration(1000 * sleepTimeSecond);
             System.sleep(config);
-            // System.sleep(wakeupPin, FALLING, sleepDuration, SLEEP_NETWORK_STANDBY); // Press wakup BUTTON to awake
+            // System.sleep(wakeupPin, FALLING, sleepTimeSecond, SLEEP_NETWORK_STANDBY); // Press wakup BUTTON to awake
         }
         // }
         break;
 
     case SLEEP_TOO_COLD:
         // Wait until its warmer
-        sleepDuration = (SLEEPTIMEinMINUTES - Time.minute() % SLEEPTIMEinMINUTES) * 60 - Time.second() + TimeBoundaryOffset;
-        if (sleepDuration > 360UL)
+        sleepTimeSecond = (SLEEPTIMEinMINUTES - Time.minute() % SLEEPTIMEinMINUTES) * 60 - Time.second() + TimeBoundaryOffset;
+        if (sleepTimeSecond > 360UL)
         {
-            sleepDuration = 300UL;
+            sleepTimeSecond = 300UL;
         }
-        Log.info("(goToSleep) Too cold to publish. - 'SLEEP_TOO_COLD' for %lu seconds.", sleepDuration);
+        Log.info("(goToSleep) Too cold to publish. - 'SLEEP_TOO_COLD' for %lu seconds.", sleepTimeSecond);
         if (Particle.connected())
         {
-            // Particle.disconnect();
-            // Cellular.disconnect();
+            Particle.disconnect();
+            Cellular.disconnect();
             // Cellular.off();
         }
         setRGBmirorring(false);
         delay(2000UL);
-        System.sleep(wakeupPin, FALLING, sleepDuration); // Low power mode
+        System.sleep(wakeupPin, FALLING, sleepTimeSecond); // Low power mode
         break;
 
     case SLEEP_LOW_BATTERY:
         // Low battery sleep i.e. STOP Mode sleep for 1 hour to gives time to battery to recharge
-        sleepDuration = (ONEHOURSLEEPTIMEinMIN - Time.minute() % ONEHOURSLEEPTIMEinMIN) * 60 - Time.second() + TimeBoundaryOffset;
-        Log.info("(goToSleep) Battery below %0.1f percent. 'SLEEP_LOW_BATTERY' for %lu seconds.", minBatteryLevel, sleepDuration);
+        sleepTimeSecond = (ONEHOURSLEEPTIMEinMIN - Time.minute() % ONEHOURSLEEPTIMEinMIN) * 60 - Time.second() + TimeBoundaryOffset;
+        Log.info("(goToSleep) Battery below %0.1f percent. 'SLEEP_LOW_BATTERY' for %lu seconds.", minBatteryLevel, sleepTimeSecond);
         // Particle.disconnect();
         setRGBmirorring(false);
         delay(2000UL);
-        System.sleep(wakeupPin, FALLING, sleepDuration); // Check again in 1 hour if publish conditions are OK
+        System.sleep(wakeupPin, FALLING, sleepTimeSecond); // Check again in 1 hour if publish conditions are OK
         break;
 
     case SLEEP_VERY_COLD:
         // Low battery sleep i.e. STOP Mode sleep for 1 hour to gives time to battery to recharge
-        sleepDuration = (ONEHOURSLEEPTIMEinMIN - Time.minute() % ONEHOURSLEEPTIMEinMIN) * 60 - Time.second() + TimeBoundaryOffset;
-        Log.info("(goToSleep) Much too cold! - 'SLEEP_VERY_COLD' for %lu seconds to protect battery.", sleepDuration);
+        sleepTimeSecond = (ONEHOURSLEEPTIMEinMIN - Time.minute() % ONEHOURSLEEPTIMEinMIN) * 60 - Time.second() + TimeBoundaryOffset;
+        Log.info("(goToSleep) Much too cold! - 'SLEEP_VERY_COLD' for %lu seconds to protect battery.", sleepTimeSecond);
         // Particle.disconnect();
         delay(2000UL);
         setRGBmirorring(false);
-        System.sleep(wakeupPin, FALLING, sleepDuration); // Check again in 1 hour if publish conditions are OK
+        System.sleep(wakeupPin, FALLING, sleepTimeSecond); // Check again in 1 hour if publish conditions are OK
         break;
 
     case SLEEP_All_NIGHT:
         // Night sleep
         delay(2000UL);
-        sleepDuration = (NightSleepTimeInMinutes - Time.minute() % NightSleepTimeInMinutes) * 60 - Time.second() + TimeBoundaryOffset;
-        Log.info("(goToSleep) It's %d O'clock. Going to 'SLEEP_All_NIGHT' for %lu minutes and %lu seconds.", Time.hour(), sleepDuration / 60, (sleepDuration / 60) % 60);
+        sleepTimeSecond = (NightSleepTimeInMinutes - Time.minute() % NightSleepTimeInMinutes) * 60 - Time.second() + TimeBoundaryOffset;
+        Log.info("(goToSleep) It's %d O'clock. Going to 'SLEEP_All_NIGHT' for %lu minutes and %lu seconds.", Time.hour(), sleepTimeSecond / 60, (sleepTimeSecond / 60) % 60);
         // Disable the charger before night sleep
         configCharger(false);
-        Log.info("(goToSleep) 'SLEEP_All_NIGHT' - Go to sleep at : %s for %lu seconds", timeNow.c_str(), sleepDuration);
-        if (sleepDuration > NIGHT_SLEEP_LENGTH_HR * 60 * 60)
+        Log.info("(goToSleep) 'SLEEP_All_NIGHT' - Go to sleep at : %s for %lu seconds", timeNow.c_str(), sleepTimeSecond);
+        if (sleepTimeSecond > NIGHT_SLEEP_LENGTH_HR * 60 * 60)
         {
-            sleepDuration = NIGHT_SLEEP_LENGTH_HR * 60 * 60;
+            sleepTimeSecond = NIGHT_SLEEP_LENGTH_HR * 60 * 60;
         }
-        Log.info("(goToSleep) sleepDuration = %lu", sleepDuration);
+        Log.info("(goToSleep) sleepTimeSecond = %lu", sleepTimeSecond);
         if (Particle.connected())
         {
-            // Particle.disconnect();
-            // Cellular.disconnect();
+            Particle.disconnect();
+            Cellular.disconnect();
             // Cellular.off();
         }
         delay(2000UL);
         setRGBmirorring(false);
-        System.sleep(wakeupPin, FALLING, sleepDuration); // Low power mode
+        System.sleep(wakeupPin, FALLING, sleepTimeSecond); // Low power mode
         break;
 
     case SLEEP_TWO_MINUTES:
@@ -593,7 +594,7 @@ bool publishData()
         Log.info("(publishData) NOT CONNECTED! Connecting to Particle cloud.");
         Particle.connect();
     }
-    if (waitFor(Particle.connected, 60000))
+    if (waitFor(Particle.connected, 180000))
     {
         Log.info("(publishData) Connected to Particle cloud!");
         syncCloudTime();
@@ -652,16 +653,10 @@ float readThermistor(int NSamples, int interval, String SelectThermistor)
     double temp = 0;
     for (int i = 0; i < NSamples; i++)
     {
-        Log.info("(publishData) Publish cancelled!!!");
-        delay(interval); // Delay between successives readings
-        if (SelectThermistor == "Ext")
-        {
-            sum += ext_thermistor->readTempC(); // Read temperature and accumulate the readings
-        }
-        else
-        {
-            sum += battery_thermistor->readTempC(); // Read temperature and accumulate the readings
-        }
+        delay(interval);                    // Delay between successives readings
+                                            // if (SelectThermistor == "Ext")
+                                            // {
+        sum += ext_thermistor->readTempC(); // Read temperature and accumulate the readings
     }
     temp = thermistorSlope * (sum / NSamples) + thermistorOffset; // Average the readings and correct the offset
     if (SelectThermistor == "Ext")
