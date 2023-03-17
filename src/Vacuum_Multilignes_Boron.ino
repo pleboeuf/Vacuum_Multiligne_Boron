@@ -221,7 +221,9 @@ void setup()
     pinMode(thermistorPowerPin, OUTPUT);
     pinMode(BLUE_LED, OUTPUT);
     pinMode(wakeupPin, INPUT_PULLUP);
-    RGB.mirrorTo(D12, D11, D13, true); // Mirror LED on external LED
+    //
+    // RGB.mirrorTo(D12, D11, D13, true); // Mirror LED on external LED
+    //
     // pinMode(D5, INPUT);   // Only required for old PCB design
     ext_thermistor = new Thermistor(Ext_thermistorInputPin, SERIESRESISTOR, THERMISTORNOMINAL, TEMPERATURENOMINAL, BCOEFFICIENT, NUMSAMPLES, SAMPLEsINTERVAL);
     // battery_thermistor = new Thermistor(Bat_thermistorInputPin, SERIESRESISTOR, 4095, THERMISTORNOMINAL, TEMPERATURENOMINAL, BCOEFFICIENT, NUMSAMPLES, SAMPLEsINTERVAL);
@@ -258,6 +260,7 @@ void setup()
         Log.info("(setup) Thermistor is calibrated: %f", thermistorOffset);
     }
     // connectTowerAndCloud();
+    Particle.publishVitals(); // Pour tester la force du signal
     Log.info("(setup) Setup Completed");
 }
 
@@ -517,7 +520,14 @@ void normal_sleep()
             .duration(1000 * sleepTimeSecond);
         delay(2000UL);
         setRGBmirorring(false);
-        System.sleep(config);
+        SystemSleepResult result = System.sleep(config);
+        delay(2s);
+        Log.info("(normal_sleep) 'Wake up reason: ", result.wakeupReason());
+        if (result.wakeupReason() == SystemSleepWakeupReason::BY_GPIO)
+        {
+            Particle.publishVitals(); // Publier les vitals si réveillé par GPIO
+            Log.info("(normal_sleep) 'Wake up by GPIO: Publishing Vitals!", result.wakeupReason());
+        }
     }
 }
 
